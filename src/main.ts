@@ -34,7 +34,6 @@ function initUI(): void {
   app.appendChild(title);
   app.appendChild(canvas);
 
-  
   canvas.addEventListener("mousedown", (e: MouseEvent) => {
     cursor.active = true;
     cursor.x = e.offsetX;
@@ -53,20 +52,17 @@ function initUI(): void {
     ctx.lineTo(e.offsetX, e.offsetY);
     ctx.stroke();
 
-    
     cursor.x = e.offsetX;
     cursor.y = e.offsetY;
   });
 
   const clearButton = document.createElement("button");
-      clearButton.innerHTML = "clear";
-      document.body.append(clearButton);
+  clearButton.innerHTML = "clear";
+  document.body.append(clearButton);
 
-      clearButton.addEventListener("click", () => {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      });
-
+  clearButton.addEventListener("click", () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  });
 }
 
 initUI();
-
