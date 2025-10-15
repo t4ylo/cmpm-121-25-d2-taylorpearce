@@ -63,6 +63,7 @@ function initUI(): void {
   clearButton.addEventListener("click", () => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   });
+  console.log("Marker");
 }
 
 initUI();
