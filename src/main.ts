@@ -4,6 +4,7 @@ type Point = { x: number; y: number };
 type Stroke = Point[];
 
 const displayList: Stroke[] = [];
+const redoStack: Stroke[] = [];
 
 type Cursor = { active: boolean; x: number; y: number };
 const cursor: Cursor = { active: false, x: 0, y: 0 };
@@ -26,7 +27,17 @@ function createDrawingCanvas(width: number, height: number): HTMLCanvasElement {
   return canvas;
 }
 
+function makeButton(label: string): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.textContent = label;
+  b.style.padding = "6px 12px";
+  b.style.fontSize = "14px";
+  b.style.cursor = "pointer";
+  return b;
+}
+
 function initUI(): void {
+  // Container
   const app = document.createElement("div");
   app.id = "app";
   document.body.appendChild(app);
@@ -49,16 +60,22 @@ function initUI(): void {
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  const clearButton = document.createElement("button");
-  clearButton.innerHTML = "Clear";
-  clearButton.style.marginTop = "10px";
-  clearButton.style.padding = "6px 12px";
-  clearButton.style.fontSize = "14px";
-  clearButton.style.cursor = "pointer";
-  app.appendChild(clearButton);
+  const controls = document.createElement("div");
+  controls.style.display = "flex";
+  controls.style.gap = "8px";
+  controls.style.marginTop = "10px";
+  controls.style.alignItems = "center";
+  controls.style.justifyContent = "center";
+  app.appendChild(controls);
 
-  clearButton.addEventListener("click", () => {
+  const undoBtn = makeButton("Undo");
+  const redoBtn = makeButton("Redo");
+  const clearBtn = makeButton("Clear");
+  controls.append(undoBtn, redoBtn, clearBtn);
+
+  clearBtn.addEventListener("click", () => {
     displayList.length = 0;
+    redoStack.length = 0;
     canvas.dispatchEvent(new Event("drawing-changed"));
   });
 
@@ -89,7 +106,17 @@ function initUI(): void {
     }
   };
 
-  canvas.addEventListener("drawing-changed", redraw);
+  const updateControls = () => {
+    undoBtn.disabled = displayList.length === 0;
+    redoBtn.disabled = redoStack.length === 0;
+  };
+
+  const onDrawingChanged = () => {
+    redraw();
+    updateControls();
+  };
+
+  canvas.addEventListener("drawing-changed", onDrawingChanged);
 
   let currentStroke: Stroke | null = null;
 
@@ -97,6 +124,8 @@ function initUI(): void {
     cursor.active = true;
     cursor.x = e.offsetX;
     cursor.y = e.offsetY;
+
+    if (redoStack.length) redoStack.length = 0;
 
     currentStroke = [{ x: cursor.x, y: cursor.y }];
     displayList.push(currentStroke);
@@ -119,9 +148,38 @@ function initUI(): void {
     cursor.active = false;
     currentStroke = null;
   }
-
   canvas.addEventListener("mouseup", endStroke);
   canvas.addEventListener("mouseleave", endStroke);
+
+  function undo() {
+    if (displayList.length === 0) return;
+    const popped = displayList.pop()!;
+    redoStack.push(popped);
+    canvas.dispatchEvent(new Event("drawing-changed"));
+  }
+
+  function redo() {
+    if (redoStack.length === 0) return;
+    const restored = redoStack.pop()!;
+    displayList.push(restored);
+    canvas.dispatchEvent(new Event("drawing-changed"));
+  }
+
+  undoBtn.addEventListener("click", undo);
+  redoBtn.addEventListener("click", redo);
+
+  globalThis.addEventListener("keydown", (e) => {
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod) return;
+
+    if (e.key.toLowerCase() === "z" && !e.shiftKey) {
+      e.preventDefault();
+      undo();
+    } else if (e.key.toLowerCase() === "z" && e.shiftKey) {
+      e.preventDefault();
+      redo();
+    }
+  });
 
   canvas.dispatchEvent(new Event("drawing-changed"));
 }
