@@ -54,11 +54,67 @@ function createMarkerLine(
   };
 }
 
+type PreviewCommand = {
+  set(x: number, y: number): void;
+  show(): void;
+  hide(): void;
+  display(ctx: CanvasRenderingContext2D): void;
+  visible(): boolean;
+};
+
+function createMarkerPreview(
+  getStrokeStyle: () => string,
+  getLineWidth: () => number,
+): PreviewCommand {
+  let x = 0;
+  let y = 0;
+  let isVisible = false;
+
+  return {
+    set(nx: number, ny: number) {
+      x = nx;
+      y = ny;
+    },
+    show() {
+      isVisible = true;
+    },
+    hide() {
+      isVisible = false;
+    },
+    visible() {
+      return isVisible;
+    },
+    display(ctx: CanvasRenderingContext2D) {
+      if (!isVisible) return;
+
+      ctx.save();
+      const lw = getLineWidth();
+
+      ctx.beginPath();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(0,0,0,0.6)";
+      ctx.fillStyle = "rgba(0,0,0,0.08)";
+      ctx.arc(x, y, lw / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(x, y, 1, 0, Math.PI * 2);
+      ctx.fillStyle = getStrokeStyle();
+      ctx.fill();
+
+      ctx.restore();
+    },
+  };
+}
+
 const displayList: DisplayCommand[] = [];
 const redoStack: DisplayCommand[] = [];
 
 const currentStrokeStyle = "black";
 let currentLineWidth = 2;
+
+let previewCmd: PreviewCommand | null = null;
 
 type Cursor = { active: boolean; x: number; y: number };
 const cursor: Cursor = { active: false, x: 0, y: 0 };
@@ -135,9 +191,10 @@ function initUI(): void {
 
   const setTool = (lineWidth: number, clicked: HTMLButtonElement) => {
     currentLineWidth = lineWidth;
-
     [thinBtn, thickBtn].forEach((b) => b.classList.remove("selectedTool"));
     clicked.classList.add("selectedTool");
+
+    canvas.dispatchEvent(new Event("tool-moved"));
   };
 
   setTool(2, thinBtn);
@@ -158,6 +215,10 @@ function initUI(): void {
   const redraw = () => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     for (const cmd of displayList) cmd.display(ctx);
+
+    if (!cursor.active && previewCmd?.visible()) {
+      previewCmd.display(ctx);
+    }
   };
 
   const updateControls = () => {
@@ -165,12 +226,18 @@ function initUI(): void {
     redoBtn.disabled = redoStack.length === 0;
   };
 
-  const onDrawingChanged = () => {
+  const onAnyChange = () => {
     redraw();
     updateControls();
   };
 
-  canvas.addEventListener("drawing-changed", onDrawingChanged);
+  canvas.addEventListener("drawing-changed", onAnyChange);
+  canvas.addEventListener("tool-moved", onAnyChange);
+
+  previewCmd = createMarkerPreview(
+    () => currentStrokeStyle,
+    () => currentLineWidth,
+  );
 
   let currentStroke: DraggableCommand | null = null;
 
@@ -178,6 +245,8 @@ function initUI(): void {
     cursor.active = true;
     cursor.x = e.offsetX;
     cursor.y = e.offsetY;
+
+    previewCmd?.hide();
 
     if (redoStack.length) redoStack.length = 0;
 
@@ -192,21 +261,36 @@ function initUI(): void {
   });
 
   canvas.addEventListener("mousemove", (e: MouseEvent) => {
-    if (!cursor.active || !currentStroke) return;
+    if (cursor.active && currentStroke) {
+      cursor.x = e.offsetX;
+      cursor.y = e.offsetY;
+      currentStroke.drag(cursor.x, cursor.y);
+      canvas.dispatchEvent(new Event("drawing-changed"));
+      return;
+    }
 
     cursor.x = e.offsetX;
     cursor.y = e.offsetY;
+    previewCmd?.set(cursor.x, cursor.y);
+    previewCmd?.show();
 
-    currentStroke.drag(cursor.x, cursor.y);
-    canvas.dispatchEvent(new Event("drawing-changed"));
+    canvas.dispatchEvent(new Event("tool-moved"));
   });
 
   function endStroke() {
     cursor.active = false;
     currentStroke = null;
+
+    previewCmd?.set(cursor.x, cursor.y);
+    previewCmd?.show();
+    canvas.dispatchEvent(new Event("tool-moved"));
   }
   canvas.addEventListener("mouseup", endStroke);
-  canvas.addEventListener("mouseleave", endStroke);
+  canvas.addEventListener("mouseleave", () => {
+    previewCmd?.hide();
+    canvas.dispatchEvent(new Event("tool-moved"));
+    endStroke();
+  });
 
   function undo() {
     if (displayList.length === 0) return;
@@ -238,7 +322,7 @@ function initUI(): void {
     }
   });
 
-  canvas.dispatchEvent(new Event("drawing-changed"));
+  canvas.dispatchEvent(new Event("tool-moved"));
 }
 
 initUI();
