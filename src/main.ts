@@ -58,17 +58,15 @@ type PreviewCommand = {
   set(x: number, y: number): void;
   show(): void;
   hide(): void;
-  display(ctx: CanvasRenderingContext2D): void;
   visible(): boolean;
+  display(ctx: CanvasRenderingContext2D): void;
 };
 
 function createMarkerPreview(
   getStrokeStyle: () => string,
   getLineWidth: () => number,
 ): PreviewCommand {
-  let x = 0;
-  let y = 0;
-  let isVisible = false;
+  let x = 0, y = 0, isVisible = false;
 
   return {
     set(nx: number, ny: number) {
@@ -86,10 +84,8 @@ function createMarkerPreview(
     },
     display(ctx: CanvasRenderingContext2D) {
       if (!isVisible) return;
-
       ctx.save();
       const lw = getLineWidth();
-
       ctx.beginPath();
       ctx.lineWidth = 1;
       ctx.strokeStyle = "rgba(0,0,0,0.6)";
@@ -97,12 +93,68 @@ function createMarkerPreview(
       ctx.arc(x, y, lw / 2, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-
       ctx.beginPath();
       ctx.arc(x, y, 1, 0, Math.PI * 2);
       ctx.fillStyle = getStrokeStyle();
       ctx.fill();
+      ctx.restore();
+    },
+  };
+}
 
+function createStickerPreview(
+  getEmoji: () => string,
+  getFontPx: () => number,
+): PreviewCommand {
+  let x = 0, y = 0, isVisible = false;
+
+  return {
+    set(nx: number, ny: number) {
+      x = nx;
+      y = ny;
+    },
+    show() {
+      isVisible = true;
+    },
+    hide() {
+      isVisible = false;
+    },
+    visible() {
+      return isVisible;
+    },
+    display(ctx: CanvasRenderingContext2D) {
+      if (!isVisible) return;
+      ctx.save();
+      ctx.font =
+        `${getFontPx()}px system-ui, Apple Color Emoji, Segoe UI Emoji`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.globalAlpha = 0.7;
+      ctx.fillText(getEmoji(), x, y);
+      ctx.globalAlpha = 1.0;
+      ctx.restore();
+    },
+  };
+}
+
+function createSticker(
+  start: Point,
+  emoji: string,
+  fontPx: number,
+): DraggableCommand {
+  const pos = { ...start };
+
+  return {
+    drag(x: number, y: number) {
+      pos.x = x;
+      pos.y = y;
+    },
+    display(ctx: CanvasRenderingContext2D) {
+      ctx.save();
+      ctx.font = `${fontPx}px system-ui, Apple Color Emoji, Segoe UI Emoji`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(emoji, pos.x, pos.y);
       ctx.restore();
     },
   };
@@ -111,8 +163,14 @@ function createMarkerPreview(
 const displayList: DisplayCommand[] = [];
 const redoStack: DisplayCommand[] = [];
 
+type ToolMode = "marker" | "sticker";
+let currentToolMode: ToolMode = "marker";
+
 const currentStrokeStyle = "black";
 let currentLineWidth = 2;
+
+let currentSticker = "⭐";
+let currentStickerPx = 32;
 
 let previewCmd: PreviewCommand | null = null;
 
@@ -170,12 +228,19 @@ function initUI(): void {
 
   const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
 
-  const toolRow = document.createElement("div");
-  toolRow.style.display = "flex";
-  toolRow.style.gap = "8px";
-  toolRow.style.alignItems = "center";
-  toolRow.style.justifyContent = "center";
-  app.appendChild(toolRow);
+  const toolRow1 = document.createElement("div");
+  toolRow1.style.display = "flex";
+  toolRow1.style.gap = "8px";
+  toolRow1.style.alignItems = "center";
+  toolRow1.style.justifyContent = "center";
+  app.appendChild(toolRow1);
+
+  const toolRow2 = document.createElement("div");
+  toolRow2.style.display = "flex";
+  toolRow2.style.gap = "8px";
+  toolRow2.style.alignItems = "center";
+  toolRow2.style.justifyContent = "center";
+  app.appendChild(toolRow2);
 
   const undoRedoRow = document.createElement("div");
   undoRedoRow.style.display = "flex";
@@ -187,19 +252,40 @@ function initUI(): void {
 
   const thinBtn = makeButton("Thin");
   const thickBtn = makeButton("Thick");
-  toolRow.append(thinBtn, thickBtn);
+  toolRow1.append(thinBtn, thickBtn);
 
-  const setTool = (lineWidth: number, clicked: HTMLButtonElement) => {
+  const setMarkerTool = (lineWidth: number, clicked: HTMLButtonElement) => {
+    currentToolMode = "marker";
     currentLineWidth = lineWidth;
-    [thinBtn, thickBtn].forEach((b) => b.classList.remove("selectedTool"));
+    [thinBtn, thickBtn, ...stickerBtns].forEach((b) =>
+      b.classList.remove("selectedTool")
+    );
     clicked.classList.add("selectedTool");
-
+    setPreviewForCurrentTool();
     canvas.dispatchEvent(new Event("tool-moved"));
   };
 
-  setTool(2, thinBtn);
-  thinBtn.addEventListener("click", () => setTool(2, thinBtn));
-  thickBtn.addEventListener("click", () => setTool(8, thickBtn));
+  const stickerChoices = ["⭐", "😊", "🍓", "🔥"];
+  const stickerBtns: HTMLButtonElement[] = stickerChoices.map((e) => {
+    const b = makeButton(e);
+    toolRow2.append(b);
+    b.addEventListener("click", () => {
+      currentToolMode = "sticker";
+      currentSticker = e;
+
+      currentStickerPx = 32;
+      [thinBtn, thickBtn, ...stickerBtns].forEach((btn) =>
+        btn.classList.remove("selectedTool")
+      );
+      b.classList.add("selectedTool");
+      setPreviewForCurrentTool();
+      canvas.dispatchEvent(new Event("tool-moved"));
+    });
+    return b;
+  });
+
+  thinBtn.addEventListener("click", () => setMarkerTool(2, thinBtn));
+  thickBtn.addEventListener("click", () => setMarkerTool(8, thickBtn));
 
   const undoBtn = makeButton("Undo");
   const redoBtn = makeButton("Redo");
@@ -215,7 +301,6 @@ function initUI(): void {
   const redraw = () => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     for (const cmd of displayList) cmd.display(ctx);
-
     if (!cursor.active && previewCmd?.visible()) {
       previewCmd.display(ctx);
     }
@@ -234,12 +319,21 @@ function initUI(): void {
   canvas.addEventListener("drawing-changed", onAnyChange);
   canvas.addEventListener("tool-moved", onAnyChange);
 
-  previewCmd = createMarkerPreview(
-    () => currentStrokeStyle,
-    () => currentLineWidth,
-  );
+  function setPreviewForCurrentTool() {
+    if (currentToolMode === "marker") {
+      previewCmd = createMarkerPreview(
+        () => currentStrokeStyle,
+        () => currentLineWidth,
+      );
+    } else {
+      previewCmd = createStickerPreview(
+        () => currentSticker,
+        () => currentStickerPx,
+      );
+    }
+  }
 
-  let currentStroke: DraggableCommand | null = null;
+  let currentCmd: DraggableCommand | null = null;
 
   canvas.addEventListener("mousedown", (e: MouseEvent) => {
     cursor.active = true;
@@ -250,36 +344,42 @@ function initUI(): void {
 
     if (redoStack.length) redoStack.length = 0;
 
-    currentStroke = createMarkerLine(
-      { x: cursor.x, y: cursor.y },
-      { strokeStyle: currentStrokeStyle, lineWidth: currentLineWidth },
-    );
-    displayList.push(currentStroke);
+    if (currentToolMode === "marker") {
+      currentCmd = createMarkerLine(
+        { x: cursor.x, y: cursor.y },
+        { strokeStyle: currentStrokeStyle, lineWidth: currentLineWidth },
+      );
+    } else {
+      currentCmd = createSticker(
+        { x: cursor.x, y: cursor.y },
+        currentSticker,
+        currentStickerPx,
+      );
+    }
 
+    displayList.push(currentCmd);
     canvas.dispatchEvent(new Event("drawing-changed"));
     e.preventDefault();
   });
 
   canvas.addEventListener("mousemove", (e: MouseEvent) => {
-    if (cursor.active && currentStroke) {
-      cursor.x = e.offsetX;
-      cursor.y = e.offsetY;
-      currentStroke.drag(cursor.x, cursor.y);
+    cursor.x = e.offsetX;
+    cursor.y = e.offsetY;
+
+    if (cursor.active && currentCmd) {
+      currentCmd.drag(cursor.x, cursor.y);
       canvas.dispatchEvent(new Event("drawing-changed"));
       return;
     }
 
-    cursor.x = e.offsetX;
-    cursor.y = e.offsetY;
     previewCmd?.set(cursor.x, cursor.y);
     previewCmd?.show();
-
     canvas.dispatchEvent(new Event("tool-moved"));
   });
 
   function endStroke() {
     cursor.active = false;
-    currentStroke = null;
+    currentCmd = null;
 
     previewCmd?.set(cursor.x, cursor.y);
     previewCmd?.show();
@@ -312,7 +412,6 @@ function initUI(): void {
   globalThis.addEventListener("keydown", (e) => {
     const mod = e.ctrlKey || e.metaKey;
     if (!mod) return;
-
     if (e.key.toLowerCase() === "z" && !e.shiftKey) {
       e.preventDefault();
       undo();
@@ -322,6 +421,7 @@ function initUI(): void {
     }
   });
 
+  setPreviewForCurrentTool();
   canvas.dispatchEvent(new Event("tool-moved"));
 }
 
