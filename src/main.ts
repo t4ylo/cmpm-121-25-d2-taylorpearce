@@ -1,10 +1,61 @@
 import "./style.css";
 
 type Point = { x: number; y: number };
-type Stroke = Point[];
 
-const displayList: Stroke[] = [];
-const redoStack: Stroke[] = [];
+type DisplayCommand = {
+  display(ctx: CanvasRenderingContext2D): void;
+};
+
+type DraggableCommand = DisplayCommand & {
+  drag(x: number, y: number): void;
+};
+
+function createMarkerLine(
+  start: Point,
+  opts?: { strokeStyle?: string; lineWidth?: number },
+): DraggableCommand {
+  const points: Point[] = [start];
+  const strokeStyle = opts?.strokeStyle ?? "black";
+  const lineWidth = opts?.lineWidth ?? 2;
+
+  return {
+    drag(x: number, y: number) {
+      points.push({ x, y });
+    },
+    display(ctx: CanvasRenderingContext2D) {
+      if (points.length === 0) return;
+
+      ctx.save();
+      ctx.strokeStyle = strokeStyle;
+      ctx.lineWidth = lineWidth;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      if (points.length === 1) {
+        const p = points[0]!;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+        ctx.fillStyle = strokeStyle;
+        ctx.fill();
+        ctx.restore();
+        return;
+      }
+
+      const first = points[0]!;
+      ctx.beginPath();
+      ctx.moveTo(first.x, first.y);
+      for (let i = 1; i < points.length; i++) {
+        const pt = points[i]!;
+        ctx.lineTo(pt.x, pt.y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    },
+  };
+}
+
+const displayList: DisplayCommand[] = [];
+const redoStack: DisplayCommand[] = [];
 
 type Cursor = { active: boolean; x: number; y: number };
 const cursor: Cursor = { active: false, x: 0, y: 0 };
@@ -37,7 +88,6 @@ function makeButton(label: string): HTMLButtonElement {
 }
 
 function initUI(): void {
-  // Container
   const app = document.createElement("div");
   app.id = "app";
   document.body.appendChild(app);
@@ -55,10 +105,6 @@ function initUI(): void {
   app.appendChild(canvas);
 
   const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
-  ctx.strokeStyle = "black";
-  ctx.lineWidth = 2;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
 
   const controls = document.createElement("div");
   controls.style.display = "flex";
@@ -81,28 +127,8 @@ function initUI(): void {
 
   const redraw = () => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    for (const stroke of displayList) {
-      if (stroke.length === 0) continue;
-
-      if (stroke.length === 1) {
-        const p = stroke[0]!;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
-        ctx.fillStyle = ctx.strokeStyle;
-        ctx.fill();
-        continue;
-      }
-
-      const first = stroke[0]!;
-      ctx.beginPath();
-      ctx.moveTo(first.x, first.y);
-
-      for (let i = 1; i < stroke.length; i++) {
-        const pt = stroke[i]!;
-        ctx.lineTo(pt.x, pt.y);
-      }
-      ctx.stroke();
+    for (const cmd of displayList) {
+      cmd.display(ctx);
     }
   };
 
@@ -118,7 +144,7 @@ function initUI(): void {
 
   canvas.addEventListener("drawing-changed", onDrawingChanged);
 
-  let currentStroke: Stroke | null = null;
+  let currentStroke: DraggableCommand | null = null;
 
   canvas.addEventListener("mousedown", (e: MouseEvent) => {
     cursor.active = true;
@@ -127,7 +153,10 @@ function initUI(): void {
 
     if (redoStack.length) redoStack.length = 0;
 
-    currentStroke = [{ x: cursor.x, y: cursor.y }];
+    currentStroke = createMarkerLine({ x: cursor.x, y: cursor.y }, {
+      strokeStyle: "black",
+      lineWidth: 2,
+    });
     displayList.push(currentStroke);
 
     canvas.dispatchEvent(new Event("drawing-changed"));
@@ -140,7 +169,7 @@ function initUI(): void {
     cursor.x = e.offsetX;
     cursor.y = e.offsetY;
 
-    currentStroke.push({ x: cursor.x, y: cursor.y });
+    currentStroke.drag(cursor.x, cursor.y);
     canvas.dispatchEvent(new Event("drawing-changed"));
   });
 
