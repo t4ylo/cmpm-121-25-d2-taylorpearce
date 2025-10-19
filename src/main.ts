@@ -57,6 +57,9 @@ function createMarkerLine(
 const displayList: DisplayCommand[] = [];
 const redoStack: DisplayCommand[] = [];
 
+const currentStrokeStyle = "black";
+let currentLineWidth = 2;
+
 type Cursor = { active: boolean; x: number; y: number };
 const cursor: Cursor = { active: false, x: 0, y: 0 };
 
@@ -88,6 +91,11 @@ function makeButton(label: string): HTMLButtonElement {
 }
 
 function initUI(): void {
+  const style = document.createElement("style");
+  style.textContent =
+    `.selectedTool{outline:2px solid #111; outline-offset:2px; border-radius:6px}`;
+  document.head.appendChild(style);
+
   const app = document.createElement("div");
   app.id = "app";
   document.body.appendChild(app);
@@ -106,18 +114,40 @@ function initUI(): void {
 
   const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
 
-  const controls = document.createElement("div");
-  controls.style.display = "flex";
-  controls.style.gap = "8px";
-  controls.style.marginTop = "10px";
-  controls.style.alignItems = "center";
-  controls.style.justifyContent = "center";
-  app.appendChild(controls);
+  const toolRow = document.createElement("div");
+  toolRow.style.display = "flex";
+  toolRow.style.gap = "8px";
+  toolRow.style.alignItems = "center";
+  toolRow.style.justifyContent = "center";
+  app.appendChild(toolRow);
+
+  const undoRedoRow = document.createElement("div");
+  undoRedoRow.style.display = "flex";
+  undoRedoRow.style.gap = "8px";
+  undoRedoRow.style.marginTop = "10px";
+  undoRedoRow.style.alignItems = "center";
+  undoRedoRow.style.justifyContent = "center";
+  app.appendChild(undoRedoRow);
+
+  const thinBtn = makeButton("Thin");
+  const thickBtn = makeButton("Thick");
+  toolRow.append(thinBtn, thickBtn);
+
+  const setTool = (lineWidth: number, clicked: HTMLButtonElement) => {
+    currentLineWidth = lineWidth;
+
+    [thinBtn, thickBtn].forEach((b) => b.classList.remove("selectedTool"));
+    clicked.classList.add("selectedTool");
+  };
+
+  setTool(2, thinBtn);
+  thinBtn.addEventListener("click", () => setTool(2, thinBtn));
+  thickBtn.addEventListener("click", () => setTool(8, thickBtn));
 
   const undoBtn = makeButton("Undo");
   const redoBtn = makeButton("Redo");
   const clearBtn = makeButton("Clear");
-  controls.append(undoBtn, redoBtn, clearBtn);
+  undoRedoRow.append(undoBtn, redoBtn, clearBtn);
 
   clearBtn.addEventListener("click", () => {
     displayList.length = 0;
@@ -127,9 +157,7 @@ function initUI(): void {
 
   const redraw = () => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    for (const cmd of displayList) {
-      cmd.display(ctx);
-    }
+    for (const cmd of displayList) cmd.display(ctx);
   };
 
   const updateControls = () => {
@@ -153,10 +181,10 @@ function initUI(): void {
 
     if (redoStack.length) redoStack.length = 0;
 
-    currentStroke = createMarkerLine({ x: cursor.x, y: cursor.y }, {
-      strokeStyle: "black",
-      lineWidth: 2,
-    });
+    currentStroke = createMarkerLine(
+      { x: cursor.x, y: cursor.y },
+      { strokeStyle: currentStrokeStyle, lineWidth: currentLineWidth },
+    );
     displayList.push(currentStroke);
 
     canvas.dispatchEvent(new Event("drawing-changed"));
