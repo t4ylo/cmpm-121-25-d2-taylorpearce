@@ -1,3 +1,3 @@
 # CMPM 121 D2 Project
 
-This is the starting point for your CMPM 121 D2 project. Students should make sure to remove _this_ content from their README.md file and replace it with their own project documentation.
+This is a drawing sketchpad that allows users to draw freely on a canvas and use stickers. The user can add custom sitckers, change the thicknes and color of the pen, and export a high quality png of their drawing.

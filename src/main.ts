@@ -12,7 +12,7 @@ function createMarkerLine(
 ): DraggableCommand {
   const points: Point[] = [start];
   const strokeStyle = opts?.strokeStyle ?? "black";
-  const lineWidth = opts?.lineWidth ?? 3; // Step 11: nicer default thin=3
+  const lineWidth = opts?.lineWidth ?? 3;
   return {
     drag(x, y) {
       points.push({ x, y });
@@ -155,11 +155,13 @@ const redoStack: DisplayCommand[] = [];
 type ToolMode = "marker" | "sticker";
 let currentTool: ToolMode = "marker";
 
-// Step 11 tuning: defaults feel nicer to draw with.
-const currentStrokeStyle = "black";
-let currentLineWidth = 3; // Fine default bumped from 2 → 3
+let currentLineWidth = 3; // Step 11 tuned fine width
 
-// Step 11 tuning: starter stickers + sizes adjusted for visual balance. :contentReference[oaicite:1]{index=1}
+// Step 12: hue slider drives marker color
+let hue = 210; // default: blue-ish
+const markerColor = () => `hsl(${hue}, 90%, 40%)`;
+
+// Stickers (tuned sizes from Step 11)
 type StickerDef = { emoji: string; px: number };
 const stickerDefs: StickerDef[] = [
   { emoji: "⭐", px: 36 },
@@ -181,7 +183,7 @@ const cursor: Cursor = { active: false, x: 0, y: 0 };
 function makeButton(label: string): HTMLButtonElement {
   const b = document.createElement("button");
   b.textContent = label;
-  b.className = "btn"; // Step 11: nicer shared styles via injected CSS
+  b.className = "btn";
   return b;
 }
 function createDrawingCanvas(w: number, h: number): HTMLCanvasElement {
@@ -191,13 +193,13 @@ function createDrawingCanvas(w: number, h: number): HTMLCanvasElement {
   c.id = "drawingCanvas";
   c.style.border = "1px solid #ccc";
   c.style.cursor = "crosshair";
-  c.style.borderRadius = "10px"; // small polish
+  c.style.borderRadius = "10px";
   c.style.boxShadow = "0 2px 12px rgba(0,0,0,0.08)";
   return c;
 }
 
 // --- Step 10: High-Res Export ---
-function exportHighResPNG(displayList: DisplayCommand[]) {
+function exportHighResPNG(list: DisplayCommand[]) {
   const big = document.createElement("canvas");
   big.width = 1024;
   big.height = 1024;
@@ -205,7 +207,7 @@ function exportHighResPNG(displayList: DisplayCommand[]) {
   if (!bctx) return;
   bctx.save();
   bctx.scale(4, 4); // 256×4 = 1024
-  for (const cmd of displayList) cmd.display(bctx);
+  for (const cmd of list) cmd.display(bctx);
   bctx.restore();
   const anchor = document.createElement("a");
   anchor.href = big.toDataURL("image/png");
@@ -215,10 +217,10 @@ function exportHighResPNG(displayList: DisplayCommand[]) {
 
 // --- App Bootstrap ---
 function initUI(): void {
-  // Step 11: inject minimal CSS to polish buttons/selection. :contentReference[oaicite:2]{index=2}
+  // Minimal CSS polish
   const style = document.createElement("style");
   style.textContent = `
-    .toolbar { display:flex; gap:8px; align-items:center; justify-content:center; }
+    .toolbar { display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap: wrap; }
     .btn {
       padding: 6px 12px; font-size: 14px; cursor: pointer;
       border: 1px solid #ddd; border-radius: 8px; background: #fafafa;
@@ -227,6 +229,7 @@ function initUI(): void {
     }
     .btn:hover { background:#f2f2f2; transform: translateY(-1px); }
     .selectedTool { outline:2px solid #111; outline-offset:2px; border-radius:8px; background:#fff; }
+    label { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
   `;
   document.head.appendChild(style);
 
@@ -240,7 +243,6 @@ function initUI(): void {
   } as CSSStyleDeclaration);
   document.body.appendChild(app);
 
-  // Different titles (per Step 11). :contentReference[oaicite:3]{index=3}
   const h1 = document.createElement("h1");
   h1.textContent = "Sticker Sketchpad";
   h1.style.textAlign = "center";
@@ -255,17 +257,20 @@ function initUI(): void {
   // Toolbars
   const row1 = Object.assign(document.createElement("div"), {
     className: "toolbar",
-  });
+  }); // marker tools
+  const hueRow = Object.assign(document.createElement("div"), {
+    className: "toolbar",
+  }); // Step 12 hue slider
   const row2 = Object.assign(document.createElement("div"), {
     className: "toolbar",
-  });
+  }); // stickers
   const row3 = Object.assign(document.createElement("div"), {
     className: "toolbar",
-  });
+  }); // undo/redo/export
   row3.style.marginTop = "10px";
-  app.append(row1, row2, row3);
+  app.append(row1, hueRow, row2, row3);
 
-  // Step 11: nicer labels + tuned widths
+  // Marker tools (fine/bold)
   const fineBtn = makeButton("Pen • Fine");
   const boldBtn = makeButton("Pen • Bold");
   row1.append(fineBtn, boldBtn);
@@ -280,10 +285,38 @@ function initUI(): void {
     setPreview();
     canvas.dispatchEvent(new Event("tool-moved"));
   };
-  fineBtn.onclick = () => setMarker(3, fineBtn); // 3px feels smooth for sketches
-  boldBtn.onclick = () => setMarker(10, boldBtn); // 10px is a bold “marker” feel
+  fineBtn.onclick = () => setMarker(3, fineBtn);
+  boldBtn.onclick = () => setMarker(10, boldBtn);
 
-  // Stickers
+  // --- Step 12: Hue slider (0–360) controlling marker color ---
+  const hueLabel = document.createElement("label");
+  hueLabel.textContent = "Hue:";
+  hueLabel.style.fontSize = "14px";
+
+  const hueValue = document.createElement("span");
+  hueValue.textContent = String(hue);
+  hueValue.style.minWidth = "36px";
+  hueValue.style.display = "inline-block";
+  hueValue.style.textAlign = "right";
+
+  const hueSlider = document.createElement("input");
+  hueSlider.type = "range";
+  hueSlider.min = "0";
+  hueSlider.max = "360";
+  hueSlider.step = "1";
+  hueSlider.value = String(hue);
+  hueSlider.style.width = "220px";
+
+  hueSlider.addEventListener("input", () => {
+    hue = Number(hueSlider.value);
+    hueValue.textContent = String(hue);
+    // Immediately repaint preview with new color
+    canvas.dispatchEvent(new Event("tool-moved"));
+  });
+
+  hueRow.append(hueLabel, hueSlider, hueValue);
+
+  // Stickers (data-driven)
   const addBtn = makeButton("+ Add Sticker");
   let stickerBtns: HTMLButtonElement[] = [];
 
@@ -314,7 +347,6 @@ function initUI(): void {
     if (!t) return;
     const s = t.trim();
     if (!s) return;
-    // Step 11: default new stickers a touch larger so they read well.
     stickerDefs.push({ emoji: s, px: 34 });
     renderStickers();
     stickerBtns.at(-1)?.click();
@@ -353,7 +385,7 @@ function initUI(): void {
 
   const setPreview = () => {
     previewCmd = currentTool === "marker"
-      ? createMarkerPreview(() => currentStrokeStyle, () => currentLineWidth)
+      ? createMarkerPreview(() => markerColor(), () => currentLineWidth)
       : createStickerPreview(() => currentSticker, () => currentStickerPx);
   };
 
@@ -367,10 +399,10 @@ function initUI(): void {
     previewCmd?.hide();
     if (redoStack.length) redoStack.length = 0;
     currentCmd = currentTool === "marker"
-      ? createMarkerLine({ x: cursor.x, y: cursor.y }, {
-        strokeStyle: currentStrokeStyle,
-        lineWidth: currentLineWidth,
-      })
+      ? createMarkerLine(
+        { x: cursor.x, y: cursor.y },
+        { strokeStyle: markerColor(), lineWidth: currentLineWidth },
+      )
       : createSticker(
         { x: cursor.x, y: cursor.y },
         currentSticker,
@@ -421,22 +453,9 @@ function initUI(): void {
   undoBtn.onclick = undo;
   redoBtn.onclick = redo;
 
-  globalThis.onkeydown = (e) => {
-    const mod = e.ctrlKey || e.metaKey;
-    if (!mod) return;
-    if (e.key.toLowerCase() === "z" && !e.shiftKey) {
-      e.preventDefault();
-      undo();
-    }
-    if (e.key.toLowerCase() === "z" && e.shiftKey) {
-      e.preventDefault();
-      redo();
-    }
-  };
-
   // Init
   renderStickers();
-  fineBtn.click(); // select the “Pen • Fine” by default (applies preview too)
+  fineBtn.click(); // default tool
   canvas.dispatchEvent(new Event("tool-moved"));
 }
 
