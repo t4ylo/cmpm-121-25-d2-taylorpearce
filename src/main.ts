@@ -1,19 +1,18 @@
 import "./style.css";
 
 // --- Core Types ---
-// Command-based drawing model for undo/redo and tool extensibility.
 type Point = { x: number; y: number };
 type DisplayCommand = { display(ctx: CanvasRenderingContext2D): void };
 type DraggableCommand = DisplayCommand & { drag(x: number, y: number): void };
 
-// --- Factory: Marker Line ---
+// --- Marker Line ---
 function createMarkerLine(
   start: Point,
   opts?: { strokeStyle?: string; lineWidth?: number },
 ): DraggableCommand {
   const points: Point[] = [start];
   const strokeStyle = opts?.strokeStyle ?? "black";
-  const lineWidth = opts?.lineWidth ?? 2;
+  const lineWidth = opts?.lineWidth ?? 3; // Step 11: nicer default thin=3
   return {
     drag(x, y) {
       points.push({ x, y });
@@ -55,7 +54,6 @@ type PreviewCommand = {
   display(ctx: CanvasRenderingContext2D): void;
 };
 
-// Marker preview circle.
 function createMarkerPreview(
   getColor: () => string,
   getWidth: () => number,
@@ -81,7 +79,7 @@ function createMarkerPreview(
       const lw = getWidth();
       ctx.beginPath();
       ctx.strokeStyle = "rgba(0,0,0,0.5)";
-      ctx.fillStyle = "rgba(0,0,0,0.1)";
+      ctx.fillStyle = "rgba(0,0,0,0.08)";
       ctx.arc(x, y, lw / 2, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
@@ -94,10 +92,9 @@ function createMarkerPreview(
   };
 }
 
-// Sticker preview emoji.
 function createStickerPreview(
   getEmoji: () => string,
-  getFont: () => number,
+  getFontPx: () => number,
 ): PreviewCommand {
   let x = 0, y = 0, vis = false;
   return {
@@ -117,7 +114,8 @@ function createStickerPreview(
     display(ctx) {
       if (!vis) return;
       ctx.save();
-      ctx.font = `${getFont()}px system-ui, Apple Color Emoji, Segoe UI Emoji`;
+      ctx.font =
+        `${getFontPx()}px system-ui, Apple Color Emoji, Segoe UI Emoji`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.globalAlpha = 0.7;
@@ -128,7 +126,7 @@ function createStickerPreview(
   };
 }
 
-// --- Factory: Sticker Command ---
+// --- Sticker Command ---
 function createSticker(
   start: Point,
   emoji: string,
@@ -156,18 +154,22 @@ const displayList: DisplayCommand[] = [];
 const redoStack: DisplayCommand[] = [];
 type ToolMode = "marker" | "sticker";
 let currentTool: ToolMode = "marker";
-const currentStrokeStyle = "black";
-let currentLineWidth = 2;
 
-// Data-driven stickers (Step 9).
+// Step 11 tuning: defaults feel nicer to draw with.
+const currentStrokeStyle = "black";
+let currentLineWidth = 3; // Fine default bumped from 2 → 3
+
+// Step 11 tuning: starter stickers + sizes adjusted for visual balance. :contentReference[oaicite:1]{index=1}
 type StickerDef = { emoji: string; px: number };
 const stickerDefs: StickerDef[] = [
-  { emoji: "⭐", px: 32 },
-  { emoji: "😊", px: 32 },
+  { emoji: "⭐", px: 36 },
+  { emoji: "😊", px: 34 },
   { emoji: "🍓", px: 32 },
-  { emoji: "🔥", px: 32 },
+  { emoji: "🔥", px: 34 },
+  { emoji: "🌸", px: 32 },
+  { emoji: "🪩", px: 30 },
 ];
-const firstSticker = stickerDefs[0] ?? { emoji: "⭐", px: 32 };
+const firstSticker = stickerDefs[0] ?? { emoji: "⭐", px: 36 };
 let currentSticker = firstSticker.emoji;
 let currentStickerPx = firstSticker.px;
 
@@ -179,21 +181,22 @@ const cursor: Cursor = { active: false, x: 0, y: 0 };
 function makeButton(label: string): HTMLButtonElement {
   const b = document.createElement("button");
   b.textContent = label;
-  b.style.padding = "6px 12px";
-  b.style.fontSize = "14px";
-  b.style.cursor = "pointer";
+  b.className = "btn"; // Step 11: nicer shared styles via injected CSS
   return b;
 }
 function createDrawingCanvas(w: number, h: number): HTMLCanvasElement {
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
+  c.id = "drawingCanvas";
   c.style.border = "1px solid #ccc";
   c.style.cursor = "crosshair";
+  c.style.borderRadius = "10px"; // small polish
+  c.style.boxShadow = "0 2px 12px rgba(0,0,0,0.08)";
   return c;
 }
 
-// --- Step 10: High-Resolution Export (1024×1024 PNG) ---
+// --- Step 10: High-Res Export ---
 function exportHighResPNG(displayList: DisplayCommand[]) {
   const big = document.createElement("canvas");
   big.width = 1024;
@@ -212,6 +215,21 @@ function exportHighResPNG(displayList: DisplayCommand[]) {
 
 // --- App Bootstrap ---
 function initUI(): void {
+  // Step 11: inject minimal CSS to polish buttons/selection. :contentReference[oaicite:2]{index=2}
+  const style = document.createElement("style");
+  style.textContent = `
+    .toolbar { display:flex; gap:8px; align-items:center; justify-content:center; }
+    .btn {
+      padding: 6px 12px; font-size: 14px; cursor: pointer;
+      border: 1px solid #ddd; border-radius: 8px; background: #fafafa;
+      transition: transform .06s ease, background .12s ease, box-shadow .12s ease;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+    }
+    .btn:hover { background:#f2f2f2; transform: translateY(-1px); }
+    .selectedTool { outline:2px solid #111; outline-offset:2px; border-radius:8px; background:#fff; }
+  `;
+  document.head.appendChild(style);
+
   const app = document.createElement("div");
   Object.assign(app.style, {
     display: "flex",
@@ -219,53 +237,56 @@ function initUI(): void {
     alignItems: "center",
     gap: "10px",
     marginTop: "20px",
-  });
+  } as CSSStyleDeclaration);
   document.body.appendChild(app);
+
+  // Different titles (per Step 11). :contentReference[oaicite:3]{index=3}
+  const h1 = document.createElement("h1");
+  h1.textContent = "Sticker Sketchpad";
+  h1.style.textAlign = "center";
+  h1.style.fontFamily =
+    "system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  app.appendChild(h1);
 
   const canvas = createDrawingCanvas(256, 256);
   const ctx = canvas.getContext("2d")!;
-  app.appendChild(
-    Object.assign(document.createElement("h1"), {
-      textContent: "Sticker Sketchpad",
-      style: "text-align:center;font-family:sans-serif",
-    }),
-  );
   app.appendChild(canvas);
 
-  const row1 = document.createElement("div"),
-    row2 = document.createElement("div"),
-    row3 = document.createElement("div");
-  [row1, row2, row3].forEach((r) =>
-    Object.assign(r.style, {
-      display: "flex",
-      gap: "8px",
-      justifyContent: "center",
-      alignItems: "center",
-    })
-  );
+  // Toolbars
+  const row1 = Object.assign(document.createElement("div"), {
+    className: "toolbar",
+  });
+  const row2 = Object.assign(document.createElement("div"), {
+    className: "toolbar",
+  });
+  const row3 = Object.assign(document.createElement("div"), {
+    className: "toolbar",
+  });
   row3.style.marginTop = "10px";
   app.append(row1, row2, row3);
 
-  // Marker tools
-  const thinBtn = makeButton("Thin"), thickBtn = makeButton("Thick");
-  row1.append(thinBtn, thickBtn);
+  // Step 11: nicer labels + tuned widths
+  const fineBtn = makeButton("Pen • Fine");
+  const boldBtn = makeButton("Pen • Bold");
+  row1.append(fineBtn, boldBtn);
 
   const setMarker = (w: number, btn: HTMLButtonElement) => {
     currentTool = "marker";
     currentLineWidth = w;
     [...row1.children, ...row2.children].forEach((el) =>
-      el.classList?.remove("selectedTool")
+      (el as HTMLElement).classList.remove("selectedTool")
     );
     btn.classList.add("selectedTool");
     setPreview();
     canvas.dispatchEvent(new Event("tool-moved"));
   };
-  thinBtn.onclick = () => setMarker(2, thinBtn);
-  thickBtn.onclick = () => setMarker(8, thickBtn);
+  fineBtn.onclick = () => setMarker(3, fineBtn); // 3px feels smooth for sketches
+  boldBtn.onclick = () => setMarker(10, boldBtn); // 10px is a bold “marker” feel
 
   // Stickers
   const addBtn = makeButton("+ Add Sticker");
   let stickerBtns: HTMLButtonElement[] = [];
+
   const renderStickers = () => {
     row2.innerHTML = "";
     stickerBtns = [];
@@ -276,7 +297,7 @@ function initUI(): void {
         currentSticker = def.emoji;
         currentStickerPx = def.px;
         [...row1.children, ...row2.children].forEach((el) =>
-          el.classList?.remove("selectedTool")
+          (el as HTMLElement).classList.remove("selectedTool")
         );
         b.classList.add("selectedTool");
         setPreview();
@@ -287,21 +308,23 @@ function initUI(): void {
     }
     row2.append(addBtn);
   };
+
   addBtn.onclick = () => {
     const t = globalThis.prompt("Custom sticker text", "🧽");
     if (!t) return;
     const s = t.trim();
     if (!s) return;
-    stickerDefs.push({ emoji: s, px: 32 });
+    // Step 11: default new stickers a touch larger so they read well.
+    stickerDefs.push({ emoji: s, px: 34 });
     renderStickers();
     stickerBtns.at(-1)?.click();
   };
 
   // Undo/Redo/Clear/Export
-  const undoBtn = makeButton("Undo"),
-    redoBtn = makeButton("Redo"),
-    clearBtn = makeButton("Clear"),
-    exportBtn = makeButton("Export PNG");
+  const undoBtn = makeButton("Undo");
+  const redoBtn = makeButton("Redo");
+  const clearBtn = makeButton("Clear");
+  const exportBtn = makeButton("Export PNG");
   row3.append(undoBtn, redoBtn, clearBtn, exportBtn);
 
   clearBtn.onclick = () => {
@@ -336,6 +359,7 @@ function initUI(): void {
 
   // Input handling
   let currentCmd: DraggableCommand | null = null;
+
   canvas.onmousedown = (e) => {
     cursor.active = true;
     cursor.x = e.offsetX;
@@ -355,6 +379,7 @@ function initUI(): void {
     displayList.push(currentCmd);
     canvas.dispatchEvent(new Event("drawing-changed"));
   };
+
   canvas.onmousemove = (e) => {
     cursor.x = e.offsetX;
     cursor.y = e.offsetY;
@@ -367,6 +392,7 @@ function initUI(): void {
     previewCmd?.show();
     canvas.dispatchEvent(new Event("tool-moved"));
   };
+
   const endStroke = () => {
     cursor.active = false;
     currentCmd = null;
@@ -381,7 +407,7 @@ function initUI(): void {
     endStroke();
   };
 
-  // Undo/Redo logic
+  // Undo/Redo
   const undo = () => {
     if (!displayList.length) return;
     redoStack.push(displayList.pop()!);
@@ -394,6 +420,7 @@ function initUI(): void {
   };
   undoBtn.onclick = undo;
   redoBtn.onclick = redo;
+
   globalThis.onkeydown = (e) => {
     const mod = e.ctrlKey || e.metaKey;
     if (!mod) return;
@@ -409,7 +436,7 @@ function initUI(): void {
 
   // Init
   renderStickers();
-  setMarker(2, thinBtn);
+  fineBtn.click(); // select the “Pen • Fine” by default (applies preview too)
   canvas.dispatchEvent(new Event("tool-moved"));
 }
 
